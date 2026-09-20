@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản Lý Sản Phẩm</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f6f8;
+            margin: 20px;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        h2 { text-align: center; color: #333; }
+        form {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 25px;
+            background: #eef2f5;
+            padding: 15px;
+            border-radius: 6px;
+        }
+        form input, form select, form button {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .full-width { grid-column: span 2; }
+        .btn-group {
+            grid-column: span 2;
+            display: flex;
+            gap: 10px;
+        }
+        .btn-submit {
+            flex: 1;
+            background-color: #28a745;
+            color: white;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+        }
+        .btn-submit:hover { background-color: #218838; }
+        .btn-cancel {
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            cursor: pointer;
+            display: none; /* Mặc định ẩn nút hủy */
+        }
+        .btn-cancel:hover { background-color: #5a6268; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #007bff; color: white; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        .btn-edit { background-color: #ffc107; color: #000; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; margin-right: 4px; }
+        .btn-edit:hover { background-color: #e0a800; }
+        .btn-delete { background-color: #dc3545; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
+        .btn-delete:hover { background-color: #c82333; }
+        .badge-km { background: #ffc107; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .badge-thuong { background: #6c757d; color: white; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>🛍️ Quản Lý Sản Phẩm</h2>
+
+        <!-- FORM THÊM / SỬA SẢN PHẨM -->
+        <form id="productForm">
+            <!-- CHỌN LOẠI SẢN PHẨM -->
+            <select id="loaiSanPham" onchange="toggleKhuyenMaiInput()">
+                <option value="THUONG">Sản phẩm Thường</option>
+                <option value="KHUYEN_MAI">Sản phẩm Khuyến Mãi</option>
+            </select>
+
+            <!-- Ô NHẬP % GIẢM GIÁ -->
+            <input type="number" id="phanTramGiam" placeholder="Phần trăm giảm (%)" min="0" max="100" style="display: none;">
+
+            <input type="text" id="tenSanPham" placeholder="Tên sản phẩm" required>
+            <input type="number" id="giaSanPham" placeholder="Giá gốc (VNĐ)" required>
+            <input type="number" id="soLuongSanPham" placeholder="Số lượng" required>
+            <input type="datetime-local" id="ngayNhapSanPham" required>
+            <input type="text" id="moTaSanPham" class="full-width" placeholder="Mô tả sản phẩm">
+            
+            <div class="btn-group">
+                <button type="submit" id="btnSubmit" class="btn-submit">➕ Thêm Sản Phẩm Mới</button>
+                <button type="button" id="btnCancel" class="btn-cancel" onclick="resetForm()">❌ Hủy Cập Nhật</button>
+            </div>
+        </form>
+
+        <!-- BẢNG DANH SÁCH SẢN PHẨM -->
+        <table>
+            <thead>
+                <tr>
+                    <th>Mã SP</th>
+                    <th>Tên SP</th>
+                    <th>Loại</th>
+                    <th>Giá Gốc</th>
+                    <th>Giảm (%)</th>
+                    <th>Giá Bán</th>
+                    <th>Số Lượng</th>
+                    <th>Hành Động</th>
+                </tr>
+            </thead>
+            <tbody id="productTableBody"></tbody>
+        </table>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8080/api/san-pham';
+        let productListCache = []; // Biến lưu tạm danh sách sản phẩm
+        let editingMaSP = null;    // Lưu mã SP đang sửa (null = đang ở chế độ Thêm mới)
+
+        // Ẩn/Hiện ô nhập % giảm giá
+        function toggleKhuyenMaiInput() {
+            const loai = document.getElementById('loaiSanPham').value;
+            const inputKM = document.getElementById('phanTramGiam');
+            if (loai === 'KHUYEN_MAI') {
+                inputKM.style.display = 'block';
+                inputKM.required = true;
+            } else {
+                inputKM.style.display = 'none';
+                inputKM.required = false;
+                inputKM.value = '';
+            }
+        }
+
+        // 1. LẤY DANH SÁCH SẢN PHẨM (GET)
+        function loadProducts() {
+            fetch(API_URL)
+                .then(res => res.json())
+                .then(data => {
+                    productListCache = data; // Lưu dữ liệu để dùng cho hàm Sửa
+                    const tbody = document.getElementById('productTableBody');
+                    tbody.innerHTML = '';
+                    
+                    data.forEach(sp => {
+                        const isKM = sp.phanTramGiam > 0 || sp.loaiSanPham === 'KHUYEN_MAI';
+                        const giaGoc = sp.giaSanPham || 0;
+                        const phanTram = sp.phanTramGiam || 0;
+                        const giaBanReal = isKM ? giaGoc * (1 - phanTram / 100) : giaGoc;
+                        
+                        tbody.innerHTML += `
+                            <tr>
+                                <td><b>${sp.maSanPham}</b></td>
+                                <td>${sp.tenSanPham}</td>
+                                <td>${isKM ? '<span class="badge-km">Khuyến Mãi</span>' : '<span class="badge-thuong">Thường</span>'}</td>
+                                <td>${giaGoc.toLocaleString('vi-VN')} VNĐ</td>
+                                <td>${isKM ? phanTram + '%' : '0%'}</td>
+                                <td><b>${giaBanReal.toLocaleString('vi-VN')} VNĐ</b></td>
+                                <td>${sp.soLuongSanPham}</td>
+                                <td>
+                                    <button class="btn-edit" onclick="editProduct('${sp.maSanPham}')">✏️ Sửa</button>
+                                    <button class="btn-delete" onclick="deleteProduct('${sp.maSanPham}')">🗑️ Xóa</button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                })
+                .catch(err => console.error('Lỗi kết nối API:', err));
+        }
+
+        // 2. CHUẨN BỊ DỮ LIỆU ĐỂ SỬA (CLICK NÚT SỬA)
+        function editProduct(maSP) {
+            const sp = productListCache.find(p => p.maSanPham === maSP);
+            if (!sp) return;
+
+            editingMaSP = maSP; // Ghi nhận mã SP đang sửa
+
+            // Đổ dữ liệu lên Form
+            document.getElementById('tenSanPham').value = sp.tenSanPham;
+            document.getElementById('giaSanPham').value = sp.giaSanPham;
+            document.getElementById('soLuongSanPham').value = sp.soLuongSanPham;
+            document.getElementById('moTaSanPham').value = sp.moTaSanPham || '';
+
+            // Format Ngày để đổ vào datetime-local input
+            if (sp.ngayNhapSanPham) {
+                const d = new Date(sp.ngayNhapSanPham);
+                const formattedDate = d.toISOString().slice(0, 16);
+                document.getElementById('ngayNhapSanPham').value = formattedDate;
+            }
+
+            // Đổ dữ liệu Loại sản phẩm & % Giảm giá
+            const isKM = sp.phanTramGiam > 0 || sp.loaiSanPham === 'KHUYEN_MAI';
+            if (isKM) {
+                document.getElementById('loaiSanPham').value = 'KHUYEN_MAI';
+                document.getElementById('phanTramGiam').value = sp.phanTramGiam;
+            } else {
+                document.getElementById('loaiSanPham').value = 'THUONG';
+            }
+            toggleKhuyenMaiInput();
+
+            // Đổi giao diện Form sang chế độ Cập nhật
+            document.getElementById('btnSubmit').innerText = '💾 Cập Nhật Sản Phẩm';
+            document.getElementById('btnSubmit').style.backgroundColor = '#007bff';
+            document.getElementById('btnCancel').style.display = 'block';
+        }
+
+        // 3. RESET FORM VỀ CHẾ ĐỘ THÊM MỚI
+        function resetForm() {
+            editingMaSP = null;
+            document.getElementById('productForm').reset();
+            toggleKhuyenMaiInput();
+            
+            document.getElementById('btnSubmit').innerText = '➕ Thêm Sản Phẩm Mới';
+            document.getElementById('btnSubmit').style.backgroundColor = '#28a745';
+            document.getElementById('btnCancel').style.display = 'none';
+        }
+
+        // 4. XỬ LÝ LƯU (THÊM MỚI HOẶC CẬP NHẬT)
+        document.getElementById('productForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const loai = document.getElementById('loaiSanPham').value;
+            const productData = {
+                loaiSanPham: loai,
+                tenSanPham: document.getElementById('tenSanPham').value,
+                giaSanPham: parseFloat(document.getElementById('giaSanPham').value),
+                soLuongSanPham: parseInt(document.getElementById('soLuongSanPham').value),
+                ngayNhapSanPham: new Date(document.getElementById('ngayNhapSanPham').value).toISOString(),
+                moTaSanPham: document.getElementById('moTaSanPham').value
+            };
+
+            if (loai === 'KHUYEN_MAI') {
+                productData.phanTramGiam = parseFloat(document.getElementById('phanTramGiam').value);
+            }
+
+            // Kiểm tra: Nếu đang sửa thì gọi PUT, thêm mới thì gọi POST
+            const method = editingMaSP ? 'PUT' : 'POST';
+            const url = editingMaSP ? `${API_URL}/${editingMaSP}` : API_URL;
+
+            fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(productData)
+            })
+            .then(res => {
+                if (res.ok) {
+                    alert(editingMaSP ? 'Cập nhật thành công!' : 'Thêm mới thành công!');
+                    resetForm();
+                    loadProducts();
+                } else {
+                    alert('Lỗi thao tác thất bại!');
+                }
+            })
+            .catch(err => console.error('Lỗi khi gửi dữ liệu:', err));
+        });
+
+        // 5. XÓA SẢN PHẨM (DELETE)
+        function deleteProduct(maSP) {
+            if (confirm(`Bạn có chắc muốn xóa sản phẩm ${maSP}?`)) {
+                fetch(`${API_URL}/${maSP}`, { method: 'DELETE' })
+                    .then(res => {
+                        if (res.ok) {
+                            alert('Xóa thành công!');
+                            if (editingMaSP === maSP) resetForm();
+                            loadProducts();
+                        }
+                    });
+            }
+        }
+
+        loadProducts();
+    </script>
+</body>
+</html>
